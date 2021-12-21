@@ -3,8 +3,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
+#include "math.h"
 
 #define TAG "DICE"
+
+
 
 void example_logs()
 {
@@ -36,11 +39,10 @@ int dice_role()
 
 void app_main(void)
 {
-   int i = 0 ;
    while(1)
    {
      vTaskDelay(1000/portTICK_PERIOD_MS);
-     ESP_LOGI(TAG,"random number %d ",esp_random());
+     ESP_LOGI(TAG,"random number %d ",dice_role());
    }
 
 }
