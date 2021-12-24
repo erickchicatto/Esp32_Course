@@ -12,9 +12,9 @@ void task1(){
   }
 }
 
-void task2(){
+void task2(void *params){
   while(true){
-    printf("reading humedicity \n ");
+    printf("reading humedicity %s \n",(char *)params);
     vTaskDelay(1000/portTICK_PERIOD_MS);
   }
 }
@@ -27,7 +27,7 @@ void app_main(void)
    //task1(); This will not working 
    //task2(); This will not working 
    xTaskCreate(&task1,"temperature reading ",2048,NULL,2,NULL);
-   xTaskCreate(&task2,"humidity reading",2048,NULL,2,NULL);
-   
+   xTaskCreatePinnedToCore((&task2),"humidity reading",2048,"task 2 ",2,NULL,1);
+
 
 }
