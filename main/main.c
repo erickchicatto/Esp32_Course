@@ -14,15 +14,34 @@ void listenForHTTP(void *params){
   while(true)
   {
     count++;
+
     printf("received HTTP message \n ");
-    vTaskDelay(5000/portTICK_PERIOD_MS);
+    long ok  = xQueueSend(queue, &count, 1000/portTICK_PERIOD_MS);
+    
+    if(ok){
+      printf("added message to queue");
+    }
+    else{
+       printf("fail to add message to queue");
+    }
+
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+    
   }
 }
 
 void task1(void *params){
+  
   while(true){
-    printf("doing something with http \n ");
+
+    int rxInt;
+    if(xQueueReceive(queue,&rxInt,5000/portTICK_PERIOD_MS))
+    {
+      printf("doing something with http %d \n ",rxInt);
+    }
+    
   }
+
 }
 
 
