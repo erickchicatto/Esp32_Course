@@ -7,19 +7,20 @@
 #include "freertos/semphr.h"
 
 /**Binary semaphore is used to indicate that something is happen.*/
-xSemaphoreHandle binSemaphore;
+xQueueHandle queue;
 
 void listenForHTTP(void *params){
-  while(true){
+  int count = 0 ;
+  while(true)
+  {
+    count++;
     printf("received HTTP message \n ");
-    xSemaphoreGive(binSemaphore);
     vTaskDelay(5000/portTICK_PERIOD_MS);
   }
 }
 
-void task2(){
+void task1(void *params){
   while(true){
-    xSemaphoreTake(binSemaphore,portMAX_DELAY);
     printf("doing something with http \n ");
   }
 }
@@ -29,9 +30,8 @@ void app_main(void)
 {
    //task1(); This will not working 
    //task2(); This will not working 
-   binSemaphore = xSemaphoreCreateBinary();
+   queue = xQueueCreate(3,sizeof(int));
    
-   xTaskCreate(&listenForHTTP,"temperature reading ",2048,NULL,2,NULL);
-   xTaskCreate(&task2,"do something with the http",2048,NULL,2,NULL);
-      
+   xTaskCreate(&listenForHTTP,"get  ",2048,NULL,2,NULL);
+   xTaskCreate(&task1,"do something with the http",2048,NULL,2,NULL);
 }

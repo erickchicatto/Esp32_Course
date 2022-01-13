@@ -9,6 +9,7 @@
     "idf.pythonBinPathWin": "c:\\esp\\tools\\python_env\\idf4.3_py3.8_env\\Scripts\\python.exe",
     "idf.toolsPathWin": "c:\\esp\\tools",
     "files.associations": {
-        "task.h": "c"
+        "task.h": "c",
+        "freertos.h": "c"
     }
 }
