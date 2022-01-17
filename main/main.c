@@ -5,24 +5,44 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "freertos/semphr.h"
+#include "freertos/event_groups.h"
 
-/**Binary semaphore is used to indicate that something is happen.*/
-xQueueHandle queue;
+// To study eventGroups : https://www.freertos.org/RTOS_Task_Notification_As_Event_Group.html
+
+EventGroupHandle_t evtGrp;
+const int gotHttps = BIT0;
+const int gotBle = BIT1;
+
 
 void listenForHTTP(void *params){
-  int count = 0 ;
+
   while(true)
   {
-    count++;
-    printf("received HTTP message \n ");
-    vTaskDelay(5000/portTICK_PERIOD_MS);
+    xEventGroupSetBits(evtGrp,gotHttps);
+    printf("got https\n");
+    vTaskDelay(2000/portTICK_PERIOD_MS);
   }
 }
 
-void task1(void *params){
-  while(true){
-    printf("doing something with http \n ");
+void listenForBlueetooh(void *params){
+
+  while(true)
+  {
+    xEventGroupSetBits(evtGrp,gotBle);
+    printf("got BLE\n");
+    vTaskDelay(5000/portTICK_PERIOD_MS);
   }
+
+}
+
+void task1(void *params){
+  
+  while(true){
+    xEventGroupWaitBits(evtGrp,gotHttps | gotBle ,true,true,portMAX_DELAY);
+    printf("received https and bluetooh \n");
+    vTaskDelay(5000/portTICK_PERIOD_MS);
+  }
+
 }
 
 
@@ -30,8 +50,9 @@ void app_main(void)
 {
    //task1(); This will not working 
    //task2(); This will not working 
-   queue = xQueueCreate(3,sizeof(int));
+   evtGrp = xEventGroupCreate();
    
-   xTaskCreate(&listenForHTTP,"get  ",2048,NULL,2,NULL);
-   xTaskCreate(&task1,"do something with the http",2048,NULL,2,NULL);
+   xTaskCreate(&listenForHTTP,"get htpps ",2048,NULL,1,NULL);
+   xTaskCreate(&listenForBlueetooh,"get BLE",2048,NULL,1,NULL);
+   xTaskCreate(&task1,"do something with the http",2048,NULL,1,NULL);
 }
