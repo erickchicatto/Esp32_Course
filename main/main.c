@@ -1,21 +1,38 @@
+
 #include <stdio.h>
 #include <string.h>
-#include "freertos/FreeRtos.h"
-#include "freertos/task.h"
 
-
-void CallingFunk()
+typedef struct Params_struct
 {
-  char buffer[3000];
-  memset(buffer,"x",3000); // fill the buffer with x 
+  char aString[20];
+  void (*functionPointer)(char *data);
+}Params;
+
+void CalledWithFunction(char*data)
+{
+  printf("%s \n",data);
 }
 
-void task1(void *parameters)
+int foo(Params *params)
 {
-   CallingFunk();
+  int x = 1;
+  for(int i = 0;i<10;i++)
+  {
+    x+=i*x;
+  }
+  params->functionPointer(params->aString);
+  memset(params->aString, 5, 1024);
+  x++;
+  return x;
 }
+
+
 
 void app_main(void)
 {
-  xTaskCreate(task1,"task1",1024*2,NULL,5,NULL);
+  Params params;
+  sprintf(params.aString,"hello world");
+  params.functionPointer = CalledWithFunction;
+  int result = foo(&params);
+  printf("%d \n",result);
 }
