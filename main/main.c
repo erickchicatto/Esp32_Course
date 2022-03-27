@@ -1,40 +1,237 @@
 #include <stdio.h>
 #include <string.h>
-#include "esp_log.h"
-#include "nvs.h"
-#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_system.h"
+#include "esp_spi_flash.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include "esp_partition.h"
+#include "driver/i2s.h"
+#include "driver/adc.h"
+//#include "audio_example_file.h"
+#include "esp_adc_cal.h"
+#include "esp_rom_sys.h"
 
-#define TAG "NVS"
+#if CONFIG_IDF_TARGET_ESP32
+
+static const char *TAG = "ad/da";
+#define V_REF                        1100
+#define ADC1_TEST_CHANNEL           (ADC1_CHANNEL_7)
+#define PARTITION_NAME              "storage"
+
+/*---------------------------------------------------------------
+                            EXAMPLE CONFIG
+---------------------------------------------------------------*/
+//enable record sound and save in flash
+#define RECORD_IN_FLASH_EN          (1)
+//enable replay recorded sound in flash
+#define REPLAY_FROM_FLASH_EN        (1)
+//i2s number
+#define EXAMPLE_I2S_NUM             (0)
+//i2s sample rate
+#define EXAMPLE_I2S_SAMPLE_RATE     (16000)
+//i2s data bits
+#define EXAMPLE_I2S_SAMPLE_BITS     (16)
+//enable display buffer for debug
+#define EXAMPLE_I2S_BUF_DEBUG       (0)
+//I2S read buffer length
+#define EXAMPLE_I2S_READ_LEN        (16 * 1024)
+//I2S data format 
+#define EXAMPLE_I2S_FORMAT          (I2S_CHANNEL_FMT_RIGHT_LEFT)
+//I2S channel number
+#define EXAMPLE_I2S_CHANNEL_NUM     ((EXAMPLE_I2S_FORMAT < I2S_CHANNEL_FMT_ONLY_RIGHT) ? (2) : (1))
+//I2S built-in ADC unit
+#define I2S_ADC_UNIT                ADC_UNIT_1
+//I2S built-in ADC channel
+#define I2S_ADC_CHANNEL             ADC1_CHANNEL_0
+//flash record size, for recording 5 seconds' data
+#define FLASH_RECORD_SIZE         (EXAMPLE_I2S_CHANNEL_NUM * EXAMPLE_I2S_SAMPLE_RATE * EXAMPLE_I2S_SAMPLE_BITS / 8 * 5)
+#define FLASH_ERASE_SIZE          (FLASH_RECORD_SIZE % FLASH_SECTOR_SIZE == 0) ? FLASH_RECORD_SIZE : FLASH_RECORD_SIZE + (FLASH_SECTOR_SIZE - FLASH_RECORD_SIZE % FLASH_SECTOR_SIZE)
+//sector size of flash
+#define FLASH_SECTOR_SIZE         (0x1000)
+//flash read / write address
+#define FLASH_ADDR                (0x200000)
+
+/*-----------------------------------------------------------------*/
+
+/**
+ * @brief I2S ADC/DAC mode init.
+ */
+
+void example_i2s_init(void)
+{
+int i2s_num = EXAMPLE_I2S_NUM;
+     i2s_config_t i2s_config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN | I2S_MODE_ADC_BUILT_IN,
+        .sample_rate =  EXAMPLE_I2S_SAMPLE_RATE,
+        .bits_per_sample = EXAMPLE_I2S_SAMPLE_BITS,
+        .communication_format = I2S_COMM_FORMAT_STAND_MSB,
+        .channel_format = EXAMPLE_I2S_FORMAT,
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 2,
+        .dma_buf_len = 1024,
+        .use_apll = 1,
+     };
+     //install and start i2s driver
+     i2s_driver_install(i2s_num, &i2s_config, 0, NULL);
+     //init DAC pad
+     i2s_set_dac_mode(I2S_DAC_CHANNEL_BOTH_EN);
+     //init ADC pad
+     i2s_set_adc_mode(I2S_ADC_UNIT, I2S_ADC_CHANNEL);
+}
+
+/*
+ * @brief erase flash for recording
+ */
+
+void example_erase_flash(void)
+{
+  #if RECORD_IN_FLASH_EN
+     printf("Erasing flash \n");
+     const esp_partition_t *data_partition = NULL;
+     data_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+            ESP_PARTITION_SUBTYPE_DATA_FAT, PARTITION_NAME);
+    if(data_partition != NULL)
+    {
+      printf("partiton addr: 0x%08x; size: %d; label: %s\n", data_partition->address, data_partition->size, data_partition->label);
+    }
+
+    printf("Erase size %d Bytes \n",FLASH_ERASE_SIZE);
+    ESP_ERROR_CHECK(esp_partition_erase_range(data_partition, 0, FLASH_ERASE_SIZE));
+  #else
+    printf("Skip flash erasing... \n");
+  #endif
+}
+
+/**
+ * @brief debug buffer data
+ */
+
+void example_disp_buffer(uint8_t *buf,int length)
+{
+#if EXAMPLE_I2S_BUF_DEBUG
+  printf("======\n");
+void example_disp_buffer(uint8_t *buf,int length)
+  for(int i=0;i<length;i++){
+    printf("%02x",buf[i]);
+    if((i + 1) % 8 == 0){
+      printf("\n");
+    }
+  }
+  printf("======\n");
+#endif
+}
+
+/**
+ * @brief Reset i2s clock and mode
+ */
+void example_reset_play_mode(void)
+{
+    i2s_set_clk(EXAMPLE_I2S_NUM, EXAMPLE_I2S_SAMPLE_RATE, EXAMPLE_I2S_SAMPLE_BITS, EXAMPLE_I2S_CHANNEL_NUM);
+}
+
+/**
+ * @brief Set i2s clock for example audio file
+ */
+void example_set_file_play_mode(void)
+{
+    i2s_set_clk(EXAMPLE_I2S_NUM, 16000, EXAMPLE_I2S_SAMPLE_BITS, 1);
+}
+
+/**
+ * @brief Scale data to 16bit/32bit for I2S DMA output.
+ *        DAC can only output 8bit data value.
+ *        I2S DMA will still send 16 bit or 32bit data, the highest 8bit contains DAC data.
+ */
+int example_i2s_dac_data_scale(uint8_t* d_buff, uint8_t* s_buff, uint32_t len)
+{
+   uint32_t j=0;
+   #if (EXAMPLE_I2S_SAMPLE_BITS == 16)
+   for(int i = 0; i < len; i++) {
+    d_buff[j++] = 0;
+    d_buff[j++] = s_buff[i];
+   }
+   return (len * 2);
+   #else
+    for (int i = 0; i < len; i++) {
+        d_buff[j++] = 0;
+        d_buff[j++] = 0;
+        d_buff[j++] = 0;
+        d_buff[j++] = s_buff[i];
+    }
+    return (len * 4);
+   #endif
+}
+
+/**
+ * @brief Scale data to 8bit for data from ADC.
+ *        Data from ADC are 12bit width by default.
+ *        DAC can only output 8 bit data.
+ *        Scale each 12bit ADC data to 8bit DAC data.
+ */
+void example_i2s_adc_data_scale(uint8_t * d_buff, uint8_t* s_buff, uint32_t len)
+{
+    uint32_t j = 0;
+    uint32_t dac_value = 0;
+#if (EXAMPLE_I2S_SAMPLE_BITS == 16)
+    for (int i = 0; i < len; i += 2) {
+        dac_value = ((((uint16_t) (s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
+        d_buff[j++] = 0;
+        d_buff[j++] = dac_value * 256 / 4096;
+    }
+#else
+    for (int i = 0; i < len; i += 4) {
+        dac_value = ((((uint16_t)(s_buff[i + 3] & 0xf) << 8) | ((s_buff[i + 2]))));
+        d_buff[j++] = 0;
+        d_buff[j++] = 0;
+        d_buff[j++] = 0;
+        d_buff[j++] = dac_value * 256 / 4096;
+    }
+#endif      
+}
+
+/**
+ * @brief I2S ADC/DAC example
+ *        1. Erase flash
+ *        2. Record audio from ADC and save in flash
+ *        3. Read flash and replay the sound via DAC
+ *        4. Play an example audio file(file format: 8bit/8khz/single channel)
+ *        5. Loop back to step 3
+ */
+void example_i2s_adc_dac(void *arg)
+{
+ // Config ESP32 memory   
+ const esp_partition_t *data_partition = NULL;
+ data_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+            ESP_PARTITION_SUBTYPE_DATA_FAT, PARTITION_NAME);
+ if(data_partition !=NULL)
+ {
+   printf("partiton addr: 0x%08x; size: %d; label: %s\n", data_partition->address, data_partition->size, data_partition->label);
+ }
+ else
+ {
+  ESP_LOGE(TAG, "Partition error: can't find partition name: %s\n", PARTITION_NAME);   
+  vTaskDelete(NULL);
+ }
+
+//1.Erase flash 
+example_erase_flash();
+
+
+
+}
+
+
+
+
+
 
 void app_main()
 {
-  vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-  ESP_ERROR_CHECK(nvs_flash_init());
-
-  nvs_handle handle;
-  ESP_ERROR_CHECK(nvs_open("store", NVS_READWRITE, &handle));
-
-  int32_t val = 0;
-  esp_err_t result = nvs_get_i32(handle, "val", &val);
-  switch (result)
-  {
-  case ESP_ERR_NVS_NOT_FOUND:
-  case ESP_ERR_NOT_FOUND:
-    ESP_LOGE(TAG, "Value not set yet");
-    break;
-  case ESP_OK:
-    ESP_LOGI(TAG, "Value is %d", val);
-    break;
-  default:
-    ESP_LOGE(TAG, "Error (%s) opening NVS handle!\n", esp_err_to_name(result));
-    break;
-  }
-  val++;
-  ESP_ERROR_CHECK(nvs_set_i32(handle, "val", val));
-  ESP_ERROR_CHECK(nvs_commit(handle));
-  nvs_close(handle);
+    
 }
+
+
+
+#endif
+
