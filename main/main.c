@@ -2,30 +2,45 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
-
-#define PIN_LED     2
 #define PIN_SWITCH  15
+xQueueHandle interputQueue;
+
+
+static void IRAM_ATTR gpio_isr_handler(void *args)
+{
+  int pinNumber = (int)args;
+  xQueueSendFromISR(interputQueue, &pinNumber, NULL);
+}
+
+void buttonPushedTask(void *params)
+{
+  int pinNumber,count = 0;
+  while(true)
+  {
+    if (xQueueReceive(interputQueue, &pinNumber, portMAX_DELAY))
+        {
+            printf("GPIO %d was pressed %d times. The state is %d\n", pinNumber, count++, gpio_get_level(PIN_SWITCH));
+        }
+  }
+}
+
+
 
 void app_main()
 {
-  gpio_pad_select_gpio(PIN_LED);
-  gpio_set_direction(PIN_LED,GPIO_MODE_OUTPUT);
   
-  gpio_pad_select_gpio(PIN_SWITCH);
-  gpio_set_direction(PIN_SWITCH,GPIO_MODE_INPUT);
+    gpio_pad_select_gpio(PIN_SWITCH);
+    gpio_set_direction(PIN_SWITCH, GPIO_MODE_INPUT);
+    gpio_pulldown_en(PIN_SWITCH);
+    gpio_pullup_dis(PIN_SWITCH);
+    gpio_set_intr_type(PIN_SWITCH, GPIO_INTR_POSEDGE);
 
-  gpio_pullup_en(PIN_SWITCH);
-  //gpio_pullup_dis(PIN_SWITCH);
+    interputQueue = xQueueCreate(10, sizeof(int));
+    xTaskCreate(buttonPushedTask, "buttonPushedTask", 2048, NULL, 1, NULL);
 
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(PIN_SWITCH, gpio_isr_handler, (void *)PIN_SWITCH);
   
-  while(true)
-  {
-    //isOn = !isOn; simulate push button
-    int level = gpio_get_level(PIN_SWITCH);
-    gpio_set_level(PIN_LED,level);
-    vTaskDelay(1);
-  }
-
-
 }
