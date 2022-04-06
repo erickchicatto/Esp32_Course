@@ -1,48 +1,36 @@
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/ledc.h"
-#include "esp_err.h"
+#include "esp_log.h"
+#include "driver/uart.h"
+#include "string.h"
 
 
+#define TXD_PIN 4
+#define RXD_PIN 5
+
+#define RX_BUF_SIZE 1024
 
 
-void app_main()
-{
+void app_main(){
 
+uart_config_t uart_config = {
+   .baud_rate = 9600,
+   .data_bits = UART_DATA_8_BITS,
+   .parity = UART_PARITY_DISABLE,
+   .stop_bits = UART_STOP_BITS_1,
+   .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+};  
+  
+  uart_param_config(UART_NUM_1,&uart_config);
+  uart_set_pin(UART_NUM_1,TXD_PIN,RXD_PIN,UART_PIN_NO_CHANGE,UART_PIN_NO_CHANGE);
+  uart_driver_install(UART_NUM_1,RX_BUF_SIZE,0,0,NULL,0);
 
-//Init the driver 
-  ledc_timer_config_t timer = {
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .duty_resolution = LEDC_TIMER_10_BIT,
-      .timer_num = LEDC_TIMER_0,
-      .freq_hz = 5000,
-      .clk_cfg = LEDC_AUTO_CLK};
+  char message[] = "ping";
+  printf("sending : %s \n",message);
+  uart_write_bytes(UART_NUM_1,message,sizeof(message)); // sending bytes
 
-  ledc_timer_config(&timer);
+  char incomming_message[RX_BUF_SIZE];
+  memset(incomming_message,0,sizeof(message));
+  uart_read_bytes(UART_NUM_1,(uint8_t*)incomming_message,RX_BUF_SIZE,pdMS_TO_TICKS(500));
+  printf("received : %s \n",incomming_message);
 
-   ledc_channel_config_t channel = {
-      .gpio_num = 4,
-      .speed_mode = LEDC_LOW_SPEED_MODE,
-      .channel = LEDC_CHANNEL_0,
-      .timer_sel = LEDC_TIMER_0,
-      .duty = 0,
-      .hpoint = 0};
-  ledc_channel_config(&channel);
-
-  ledc_fade_func_install(0);
-   
-  for(int i=0;i<1024;i++)
-  {
-    ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,i,0);
-    vTaskDelay(10/portTICK_PERIOD_MS);
-  }
-
-  while(true)
-  {
-    ledc_set_fade_time_and_start(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,0,1000,LEDC_FADE_WAIT_DONE);
-    ledc_set_fade_time_and_start(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,1024,1000,LEDC_FADE_WAIT_DONE);
-  }
-
-
-}
+} 
