@@ -1,36 +1,81 @@
 #include <stdio.h>
+#include "freertos/FreeRtos.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "driver/ledc.h"
 #include "esp_log.h"
-#include "driver/uart.h"
-#include "string.h"
+
+static char tag[]="servo1";
 
 
-#define TXD_PIN 4
-#define RXD_PIN 5
+void sweepServo_task(void *ignore){
 
-#define RX_BUF_SIZE 1024
+   int bitSize = 15;
+   int minValue = 500;
+   int maxValue = 2500;
+   int sweepDuration = 1500;
+   int duty = (1<<bitSize)*minValue /20000;
+   int direction = 1;
+   int valueChangeRate = 20;
+
+   ESP_LOGD(tag, ">> task_Servo1");
+
+  // for the timmer 
+   ledc_timer_config_t timer_config; // for the timer config
+   timer_config.bit_num=LEDC_TIMER_15_BIT;
+   timer_config.freq_hz= 50;
+   timer_config.speed_mode = LEDC_HIGH_SPEED_MODE;
+   timer_config.timer_num = LEDC_TIMER_0;
+   ledc_timer_config(&timer_config);
+  
+  //for the channel
+   ledc_channel_config_t ledc_config;
+   ledc_config.channel = LEDC_CHANNEL_0;
+   ledc_config.duty = duty;
+   ledc_config.gpio_num = 16;
+   ledc_config.intr_type = LEDC_INTR_DISABLE;
+   ledc_config.speed_mode = LEDC_HIGH_SPEED_MODE;
+   ledc_config.timer_sel = LEDC_TIMER_0;
+   ledc_channel_config(&ledc_config);
+
+
+   // you can alterate that after
+   int changesPerSweep = sweepDuration / valueChangeRate ;
+   int changeDelta = ((maxValue-minValue)/changesPerSweep);
+   int i;
+   ESP_LOGD(tag, "sweepDuration : %d seconds",sweepDuration);
+   ESP_LOGD(tag, "changesPerSweep : %d seconds",changesPerSweep);
+   ESP_LOGD(tag, "changeDelta : %d seconds",changeDelta);
+   ESP_LOGD(tag, "valueChangeRate: %d ",valueChangeRate);
+
+   while(1)
+   {
+      for(i=0;i<changesPerSweep;++i)
+      {
+         if(direction > 0)
+         {
+          duty += changeDelta;
+         }
+
+         else 
+         {
+          duty -= changeDelta;
+         }
+       ledc_set_duty(LEDC_HIGH_SPEED_MODE,LEDC_CHANNEL_0,duty);
+       ledc_update_duty(LEDC_HIGH_SPEED_MODE,LEDC_CHANNEL_0);
+       vTaskDelay(valueChangeRate/portTICK_PERIOD_MS);
+      }
+     direction = -direction;
+     ESP_LOGD(tag,"Direction now  %d",direction);
+
+   }
+vTaskDelete(NULL);
+}
 
 
 void app_main(){
-
-uart_config_t uart_config = {
-   .baud_rate = 9600,
-   .data_bits = UART_DATA_8_BITS,
-   .parity = UART_PARITY_DISABLE,
-   .stop_bits = UART_STOP_BITS_1,
-   .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-};  
-  
-  uart_param_config(UART_NUM_1,&uart_config);
-  uart_set_pin(UART_NUM_1,TXD_PIN,RXD_PIN,UART_PIN_NO_CHANGE,UART_PIN_NO_CHANGE);
-  uart_driver_install(UART_NUM_1,RX_BUF_SIZE,0,0,NULL,0);
-
-  char message[] = "ping";
-  printf("sending : %s \n",message);
-  uart_write_bytes(UART_NUM_1,message,sizeof(message)); // sending bytes
-
-  char incomming_message[RX_BUF_SIZE];
-  memset(incomming_message,0,sizeof(message));
-  uart_read_bytes(UART_NUM_1,(uint8_t*)incomming_message,RX_BUF_SIZE,pdMS_TO_TICKS(500));
-  printf("received : %s \n",incomming_message);
+ 
+ xTaskCreate(&sweepServo_task,"sweepServo_task",2048,NULL,5,NULL);
+ printf("Servo sweep task started \n");
 
 } 
